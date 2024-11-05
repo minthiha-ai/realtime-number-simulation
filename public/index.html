@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Singapore 2D</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+    <!-- Header Section -->
+    <div class="header">
+        <h2>Singapore 2D</h2>
+        <div class="header-icons">
+            <span>🎧</span>
+            <span>⚙️</span>
+        </div>
+    </div>
+
+    <!-- Current 2D Result Circle -->
+    <div class="circle" id="current-result">--</div>
+
+    <!-- Time Slots Container -->
+    <div id="time-slots-container"></div>
+
+    <!-- Footer Buttons -->
+    <div class="footer-buttons">
+        <div class="footer-button">
+            <span>📅</span>
+            <span>2D Calendar</span>
+        </div>
+        <div class="footer-button">
+            <span>📆</span>
+            <span>Closed Day</span>
+        </div>
+    </div>
+
+    <!-- Socket.IO Script -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io('http://localhost:3000');
+
+        // Helper function to convert 24-hour format to 12-hour AM/PM format
+        function formatToAMPM(time) {
+            const [hour, minute] = time.split(':');
+            const hourInt = parseInt(hour);
+            const ampm = hourInt >= 12 ? 'PM' : 'AM';
+            const formattedHour = hourInt % 12 || 12; // Convert "0" hour to "12" for 12-hour format
+            return `${formattedHour}:${minute} ${ampm}`;
+        }
+
+        // Fetch lottery times from the server and render them in the UI
+        async function fetchAndRenderTimeSlots() {
+            try {
+                const response = await fetch('http://localhost:3000/api/lottery-time/active');
+                const lotteryTimes = await response.json();
+
+                const container = document.getElementById('time-slots-container');
+                container.innerHTML = ''; // Clear any existing content
+
+                lotteryTimes.forEach((slot) => {
+                    const slotId = `slot-${slot.id}`;
+                    const formattedTime = formatToAMPM(slot.lottery_time); // Convert time to AM/PM format
+
+                    // Create time slot elements
+                    container.innerHTML += `
+                        <div class="time-slot" id="${slotId}">
+                            <div class="content">${formattedTime}</div>
+                            <div class="content">
+                                <span>SGX</span>
+                                <div id="${slotId}-sgx">--</div>
+                            </div>
+                            <div class="content">
+                                <span>Value</span>
+                                <div id="${slotId}-value">--</div>
+                            </div>
+                            <div class="content">
+                                <span>2D</span>
+                                <div id="${slotId}-2d">--</div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                // After rendering slots, fetch finalized results to update any past data
+                fetchFinalizedResults();
+            } catch (error) {
+                console.error('Error fetching lottery times:', error);
+            }
+        }
+
+        // Update function for a specific time slot using lotteryTimeId
+        function updateSlot(lotteryTimeId, sgx, value, result, isFinal = false) {
+            const sgxElement = document.getElementById(`slot-${lotteryTimeId}-sgx`);
+            const valueElement = document.getElementById(`slot-${lotteryTimeId}-value`);
+            const resultElement = document.getElementById(`slot-${lotteryTimeId}-2d`);
+
+            if (sgxElement && valueElement && resultElement) {
+                sgxElement.innerText = sgx || '--';
+                valueElement.innerText = value || '--';
+                resultElement.innerText = result || '--';
+
+                if (isFinal) {
+                    // Optional: Apply a "finalized" style to indicate locked-in values
+                    sgxElement.classList.add('finalized');
+                    valueElement.classList.add('finalized');
+                    resultElement.classList.add('finalized');
+                }
+            } else {
+                console.warn(`Elements for lotteryTimeId ${lotteryTimeId} not found in DOM`);
+            }
+        }
+
+        // Fetch finalized results on page load
+        async function fetchFinalizedResults() {
+            try {
+                const response = await fetch('/api/finalized-results');
+                const results = await response.json();
+
+                results.forEach(result => {
+                    // Directly pass individual values to updateSlot
+                    updateSlot(
+                        result.lottery_time_id,
+                        result.set_value,
+                        result.trade_value,
+                        result.result_2d,
+                        true // isFinal is true for finalized results
+                    );
+                });
+            } catch (error) {
+                console.error("Error fetching finalized results:", error);
+            }
+        }
+
+        // Listen for the 'simulation_start' event to start the simulation display
+        socket.on('simulation_start', (data) => {
+            document.getElementById('current-result').innerText = data.result_2d || '--';
+            updateSlot(data.lotteryTimeId, data.set_value, data.trade_value, data.result_2d);
+        });
+
+        // Listen for the 'simulate_values' event to display ongoing simulation values
+        socket.on('simulate_values', (data) => {
+            document.getElementById('current-result').innerText = data.result_2d || '--';
+            updateSlot(data.lotteryTimeId, data.set_value, data.trade_value, data.result_2d);
+        });
+
+        // Listen for the 'final_result' event to lock in the final result
+        socket.on('final_result', (data) => {
+            document.getElementById('current-result').innerText = data.result_2d || '--';
+            updateSlot(data.lotteryTimeId, data.set_value, data.trade_value, data.result_2d, true);
+        });
+
+        // Initialize by fetching and rendering time slots
+        fetchAndRenderTimeSlots();
+    </script>
+</body>
+
+</html>
